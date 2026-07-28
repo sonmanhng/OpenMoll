@@ -1,0 +1,33 @@
+[package]
+name = "OpenMoll"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = { version = "0.14", features = ["dynamic_linking"] }
+bevy_egui = "0.28"
+pdbtbx = { version = "0.12", features = ["rstar"] }
+rayon = "1.10"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+tokio = { version = "1.37", features = ["full"] }
+anyhow = "1.0"
+rfd = "0.14"
+futures-lite = "2.3.0"
+bevy_panorbit_camera = { version = "0.19", features = ["bevy_egui"] }
+mcubes = "0.1.7"
+glam = "0.27"
+lin_alg = "1.4.3"
+nalgebra = "0.32"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
