@@ -351,6 +351,11 @@ fn spawn_protein_meshes(
         }
     }
 
+    // If there are no objects but there are still meshes, we must clear them
+    if object_manager.objects.is_empty() && !existing_atoms.is_empty() {
+        any_changed = true;
+    }
+
     if !any_changed {
         return;
     }

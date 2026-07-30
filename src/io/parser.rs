@@ -318,6 +318,8 @@ pub fn load_pdb(path: &str) -> Result<Protein> {
     let lower = path.to_lowercase();
     if lower.ends_with(".pdb") {
         return load_pdb_native(path);
+    } else if lower.ends_with(".sdf") {
+        return load_sdf_file(path);
     }
 
     // ── mmCIF / CIF: use pdbtbx ───────────────────────────────────────────
@@ -511,6 +513,88 @@ fn classify_chain_type(residues: &[Residue]) -> MoleculeType {
     } else {
         MoleculeType::DNA
     }
+}
+
+/// Parses a basic V2000 SDF file to load a standalone ligand.
+fn load_sdf_file(path: &str) -> Result<Protein> {
+    let content = std::fs::read_to_string(path)?;
+    let mut lines = content.lines();
+
+    let name = lines.next().unwrap_or("Ligand").trim().to_string();
+    let _ = lines.next(); // user/program/date
+    let _ = lines.next(); // comment
+
+    let counts_line = lines.next().ok_or_else(|| anyhow::anyhow!("Invalid SDF: missing counts line"))?;
+    if counts_line.len() < 6 {
+        return Err(anyhow::anyhow!("Invalid SDF counts line"));
+    }
+    
+    let num_atoms: usize = counts_line[0..3].trim().parse().unwrap_or(0);
+    let num_bonds: usize = counts_line[3..6].trim().parse().unwrap_or(0);
+
+    let mut atoms = Vec::new();
+    for i in 0..num_atoms {
+        let line = lines.next().ok_or_else(|| anyhow::anyhow!("Missing atom block"))?;
+        if line.len() < 34 { continue; }
+        let x: f64 = line[0..10].trim().parse().unwrap_or(0.0);
+        let y: f64 = line[10..20].trim().parse().unwrap_or(0.0);
+        let z: f64 = line[20..30].trim().parse().unwrap_or(0.0);
+        let element = line[31..34].trim().to_string();
+        
+        atoms.push(Atom {
+            serial: i as i32 + 1,
+            name: element.clone(),
+            element,
+            x, y, z,
+            b_factor: 0.0,
+            is_backbone: false,
+            is_hetero: true,
+        });
+    }
+
+    let mut bonds = Vec::new();
+    for _ in 0..num_bonds {
+        let line = lines.next().ok_or_else(|| anyhow::anyhow!("Missing bond block"))?;
+        if line.len() < 6 { continue; }
+        let a: usize = line[0..3].trim().parse().unwrap_or(1);
+        let b: usize = line[3..6].trim().parse().unwrap_or(1);
+        if a > 0 && b > 0 {
+            bonds.push((a - 1, b - 1));
+        }
+    }
+
+    let mut ligand = Ligand {
+        name: name.clone(),
+        chain_id: "A".to_string(),
+        seq_num: 1,
+        atoms: atoms.clone(),
+        bonds,
+        ligand_type: LigandType::Ligand,
+    };
+
+    let residue = Residue {
+        name: name.clone(),
+        seq_num: 1,
+        atoms,
+        secondary_structure: SecondaryStructure::Coil,
+    };
+
+    let chain = Chain {
+        id: "A".to_string(),
+        residues: vec![residue],
+        molecule_type: MoleculeType::SmallMolecule,
+    };
+
+    Ok(Protein {
+        name: std::path::Path::new(path)
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string(),
+        chains: vec![chain],
+        bonds: Vec::new(),
+        ligands: vec![ligand],
+    })
 }
 
 #[cfg(test)]

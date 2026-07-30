@@ -725,28 +725,6 @@ fn render_right_panel(
                 // MD tab is always available (doesn't need a loaded structure)
                 let is_md_tab = console_state.active_tab == InspectorTab::MolecularDynamics;
 
-                if object_manager.objects.is_empty() && !is_md_tab {
-                    ui.add_space(4.0);
-                    ui.label(muted_sm("Import a structure to enable analysis controls."));
-                    // Still show MD tab button even when no structures
-                    ui.add_space(8.0);
-                    ui.horizontal_wrapped(|ui| {
-                        inspector_tab_button(ui, console_state, InspectorTab::MolecularDynamics, "⚛ MD");
-                    });
-                    return;
-                }
-
-                if !is_md_tab {
-                    let Some(idx) = console_state.selected_object else {
-                        ui.add_space(4.0);
-                        ui.label(muted_sm("Select a structure from the left panel."));
-                        return;
-                    };
-                    if idx >= object_manager.objects.len() {
-                        return;
-                    }
-                }
-
                 ui.add_space(8.0);
                 ui.horizontal_wrapped(|ui| {
                     inspector_tab_button(ui, console_state, InspectorTab::Structure, "Structure");
@@ -768,7 +746,26 @@ fn render_right_panel(
                 .id_source("inspector_scroll")
                 .show(ui, |ui| {
                     // Molecular Dynamics tab — works standalone
-                    if console_state.active_tab == InspectorTab::MolecularDynamics {
+                    let is_md_tab = console_state.active_tab == InspectorTab::MolecularDynamics;
+
+                    if object_manager.objects.is_empty() && !is_md_tab {
+                        ui.add_space(4.0);
+                        ui.label(muted_sm("Import a structure to enable analysis controls."));
+                        return;
+                    }
+
+                    if !is_md_tab {
+                        let Some(idx) = console_state.selected_object else {
+                            ui.add_space(4.0);
+                            ui.label(muted_sm("Select a structure from the left panel."));
+                            return;
+                        };
+                        if idx >= object_manager.objects.len() {
+                            return;
+                        }
+                    }
+
+                    if is_md_tab {
                         card_frame().show(ui, |ui| {
                             render_molecular_dynamics_tab(
                                 ui, md_state, object_manager,
@@ -2451,7 +2448,7 @@ fn spawn_file_dialog(commands: &mut Commands) {
     let task_pool = IoTaskPool::get();
     let task = task_pool.spawn(async move {
         let file = AsyncFileDialog::new()
-            .add_filter("Structure Files", &["pdb", "cif", "mmcif"])
+            .add_filter("Structure Files", &["pdb", "cif", "mmcif", "sdf"])
             .pick_file()
             .await;
         file.map(|f| f.path().to_path_buf())
@@ -2904,7 +2901,7 @@ fn spawn_md_topology_dialog(commands: &mut Commands) {
     let task_pool = IoTaskPool::get();
     let task = task_pool.spawn(async move {
         let file = AsyncFileDialog::new()
-            .add_filter("Structure Files", &["pdb", "cif", "mmcif"])
+            .add_filter("Structure Files", &["pdb", "cif", "mmcif", "sdf"])
             .pick_file()
             .await;
         if let Some(f) = file {

@@ -23,7 +23,7 @@ impl Plugin for IoPlugin {
         app.add_event::<LoadFileEvent>()
             .add_event::<ProteinLoadedEvent>()
             .add_event::<XtcLoadedEvent>()
-            .add_systems(Update, handle_file_load);
+            .add_systems(Update, (handle_file_load, handle_drag_and_drop));
     }
 }
 
@@ -49,4 +49,21 @@ fn handle_file_load(
         }
     }
 }
+
+fn handle_drag_and_drop(
+    mut dnd_events: EventReader<bevy::window::FileDragAndDrop>,
+    mut load_events: EventWriter<LoadFileEvent>,
+) {
+    for event in dnd_events.read() {
+        if let bevy::window::FileDragAndDrop::DroppedFile { path_buf, .. } = event {
+            if let Some(ext) = path_buf.extension().and_then(|s| s.to_str()) {
+                let lower = ext.to_lowercase();
+                if lower == "pdb" || lower == "cif" || lower == "mmcif" || lower == "sdf" {
+                    load_events.send(LoadFileEvent(path_buf.clone()));
+                }
+            }
+        }
+    }
+}
+
 pub mod export;
