@@ -357,6 +357,15 @@ fn spawn_protein_meshes(
     }
 
     if !any_changed {
+        for (_, atom_mesh) in existing_atoms.iter() {
+            if atom_mesh.object_index >= object_manager.objects.len() {
+                any_changed = true;
+                break;
+            }
+        }
+    }
+
+    if !any_changed {
         return;
     }
 
@@ -370,6 +379,22 @@ fn spawn_protein_meshes(
         }
     }
 
+    let anchor_center = if let Some(first_obj) = object_manager.objects.first() {
+        let mut center = Vec3::ZERO;
+        let mut count = 0;
+        for chain in &first_obj.protein.chains {
+            for residue in &chain.residues {
+                for atom in &residue.atoms {
+                    center += Vec3::new(atom.x as f32, atom.y as f32, atom.z as f32);
+                    count += 1;
+                }
+            }
+        }
+        if count > 0 { center / count as f32 } else { Vec3::ZERO }
+    } else {
+        Vec3::ZERO
+    };
+
     for (obj_idx, obj) in object_manager.objects.iter_mut().enumerate() {
         if !obj.changed {
             continue;
@@ -381,21 +406,8 @@ fn spawn_protein_meshes(
 
         let protein = &obj.protein;
 
-        let mut center = Vec3::ZERO;
-        let mut count = 0;
-
-        for chain in &protein.chains {
-            for residue in &chain.residues {
-                for atom in &residue.atoms {
-                    center += Vec3::new(atom.x as f32, atom.y as f32, atom.z as f32);
-                    count += 1;
-                }
-            }
-        }
-
-        if count > 0 {
-            center /= count as f32;
-        }
+        // Use the global scene anchor so multiple loaded structures align correctly
+        let center = anchor_center;
 
         // Cache center for use by sync_md_transforms during playback
         obj.center = center;
@@ -468,16 +480,15 @@ fn spawn_protein_meshes(
                             // Skip hydrogen atoms in water — they're invisible at macro scale
                             // and each H = 1 extra entity/draw-call
                             if is_hoh {
-                                let el = atom.element.trim().to_uppercase();
-                                if el == "H" || el == "D" { continue; }
+                                let el = atom.get_element_char();
+                                if el == 'H' || el == 'D' { continue; }
                             }
 
                             let mat = if let Some(ref cm) = custom_mat {
                                 cm.clone()
                             } else {
-                                let element_char = atom.element.chars()
-                                    .next().unwrap_or('C').to_ascii_uppercase();
-                                if is_hoh { mat_hoh_o.clone() } else { elem_mat!(element_char) }
+                                let el = atom.get_element_char();
+                                if is_hoh { mat_hoh_o.clone() } else { elem_mat!(el) }
                             };
                             commands.spawn((
                                 PbrBundle {
@@ -519,13 +530,13 @@ fn spawn_protein_meshes(
                     for atom in &ligand.atoms {
                         // Skip H in water ligands
                         if is_water {
-                            let el = atom.element.trim().to_uppercase();
-                            if el == "H" || el == "D" { continue; }
+                            let el = atom.get_element_char();
+                            if el == 'H' || el == 'D' { continue; }
                         }
                         let mat = if let Some(ref cm) = custom_mat {
                             cm.clone()
                         } else {
-                            let el = atom.element.chars().next().unwrap_or('C').to_ascii_uppercase();
+                            let el = atom.get_element_char();
                             if is_water { mat_hoh_o.clone() } else { elem_mat!(el) }
                         };
                         commands.spawn((
@@ -570,7 +581,7 @@ fn spawn_protein_meshes(
                         = std::collections::HashMap::new();
 
                     for atom in &ligand.atoms {
-                        let el = atom.element.chars().next().unwrap_or('C').to_ascii_uppercase();
+                        let el = atom.get_element_char();
                         // Skip H in water sticks (only O matters for HOH display)
                         if is_water_lig && (el == 'H') { continue; }
 
@@ -659,12 +670,13 @@ fn spawn_protein_meshes(
                                 let (pb, eb, mb) = &stick_atoms[&keys[j]];
                                 let dsq = pa.distance_squared(*pb);
 
-                                // Prevent H-H covalent bonds (e.g. in HOH)
-                                if *ea == 'H' && *eb == 'H' {
-                                    continue;
-                                }
+                                let dynamic_threshold_sq = if *ea == 'H' || *eb == 'H' {
+                                    1.4_f32 * 1.4_f32
+                                } else {
+                                    threshold_sq
+                                };
 
-                                if dsq > min_sq && dsq < threshold_sq {
+                                if dsq > min_sq && dsq < dynamic_threshold_sq {
                                     let sa = keys[i];
                                     let sb = keys[j];
                                     draw_lig_bond!(*pa, *pb, ma.clone(), mb.clone(), sa, sb);
@@ -723,12 +735,7 @@ fn spawn_protein_meshes(
                             let atom_a = &residue.atoms[ai];
                             let pa = Vec3::new(atom_a.x as f32, atom_a.y as f32, atom_a.z as f32)
                                 - center;
-                            let el_a = atom_a
-                                .element
-                                .chars()
-                                .next()
-                                .unwrap_or('C')
-                                .to_ascii_uppercase();
+                            let el_a = atom_a.get_element_char();
 
                             let is_hoh = residue.name == "HOH" || residue.name == "WAT";
                             if is_hoh && (el_a == 'H' || el_a == 'D') { continue; }
@@ -772,13 +779,15 @@ fn spawn_protein_meshes(
                                                     atom_b.z as f32,
                                                 ) - center;
                                                 let dsq = pa.distance_squared(pb);
-                                                if dsq > min_dist_sq && dsq < bond_threshold_sq {
-                                                    let el_b = atom_b
-                                                        .element
-                                                        .chars()
-                                                        .next()
-                                                        .unwrap_or('C')
-                                                        .to_ascii_uppercase();
+                                                let el_b = atom_b.get_element_char();
+                                                        
+                                                let dynamic_threshold_sq = if el_a == 'H' || el_b == 'H' {
+                                                    1.4_f32 * 1.4_f32
+                                                } else {
+                                                    bond_threshold_sq
+                                                };
+
+                                                if dsq > min_dist_sq && dsq < dynamic_threshold_sq {
                                                     if is_hoh && (el_b == 'H' || el_b == 'D') { continue; }
 
                                                     let ma = if let Some(ref cm) = custom_mat_chain {
@@ -908,7 +917,7 @@ fn spawn_protein_meshes(
                     for residue in &chain.residues {
                         let is_hoh = residue.name == "HOH" || residue.name == "WAT";
                         for atom in &residue.atoms {
-                            let el = atom.element.chars().next().unwrap_or('C').to_ascii_uppercase();
+                            let el = atom.get_element_char();
                             if is_hoh && (el == 'H' || el == 'D') { continue; }
 
                             let mat = if let Some(ref cm) = custom_mat_chain {
@@ -951,7 +960,7 @@ fn spawn_protein_meshes(
                     let is_water_lig = crate::core::protein::WATER_NAMES.contains(&ligand.name.as_str());
 
                     for atom in &ligand.atoms {
-                        let el = atom.element.chars().next().unwrap_or('C').to_ascii_uppercase();
+                        let el = atom.get_element_char();
                         if is_water_lig && (el == 'H' || el == 'D') { continue; }
 
                         let mat = if let Some(ref cm) = custom_mat_lig {
@@ -1182,10 +1191,10 @@ fn ray_sphere_intersect(
 
 /// Compute the centroid of all protein atoms (same as spawn_protein_meshes).
 fn compute_scene_center(object_manager: &ObjectManager) -> Vec3 {
-    let mut center = Vec3::ZERO;
-    let mut count = 0usize;
-    for obj in &object_manager.objects {
-        for chain in &obj.protein.chains {
+    if let Some(first_obj) = object_manager.objects.first() {
+        let mut center = Vec3::ZERO;
+        let mut count = 0usize;
+        for chain in &first_obj.protein.chains {
             for residue in &chain.residues {
                 for atom in &residue.atoms {
                     center += Vec3::new(atom.x as f32, atom.y as f32, atom.z as f32);
@@ -1193,8 +1202,10 @@ fn compute_scene_center(object_manager: &ObjectManager) -> Vec3 {
                 }
             }
         }
+        if count > 0 { center / count as f32 } else { Vec3::ZERO }
+    } else {
+        Vec3::ZERO
     }
-    if count > 0 { center / count as f32 } else { Vec3::ZERO }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

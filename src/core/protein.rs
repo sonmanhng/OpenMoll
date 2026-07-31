@@ -98,6 +98,21 @@ pub struct Atom {
     pub is_hetero: bool,
 }
 
+impl Atom {
+    pub fn get_element_char(&self) -> char {
+        if !self.element.is_empty() {
+            return self.element.chars().next().unwrap_or('C').to_ascii_uppercase();
+        }
+        let name = self.name.trim();
+        if name.is_empty() { return 'C'; }
+        let mut c = name.chars().next().unwrap();
+        if c.is_ascii_digit() {
+            c = name.chars().nth(1).unwrap_or('C');
+        }
+        c.to_ascii_uppercase()
+    }
+}
+
 /// Secondary structure classification
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SecondaryStructure {
